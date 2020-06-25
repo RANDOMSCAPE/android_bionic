@@ -474,7 +474,6 @@ cc_library_static {
         "upstream-openbsd/lib/libc/string/strpbrk.c",
         "upstream-openbsd/lib/libc/string/strsep.c",
         "upstream-openbsd/lib/libc/string/strspn.c",
-        "upstream-openbsd/lib/libc/string/strstr.c",
         "upstream-openbsd/lib/libc/string/strtok.c",
         "upstream-openbsd/lib/libc/string/strxfrm.c",
         "upstream-openbsd/lib/libc/string/wcslcpy.c",
@@ -502,6 +501,7 @@ cc_library_static {
     srcs: [
         "stdio/vfprintf.cpp",
         "stdio/vfwprintf.cpp",
+        "upstream-openbsd/lib/libc/string/strstr.c",
     ],
     cflags: [
         "-include openbsd-compat.h",
@@ -550,11 +550,13 @@ cc_library_static {
                 "upstream-openbsd/lib/libc/string/strcpy.c",
                 "upstream-openbsd/lib/libc/string/stpcpy.c",
                 "upstream-openbsd/lib/libc/string/strcat.c",
+                "upstream-openbsd/lib/libc/string/memchr.c",
             ],
         },
         arm64: {
             exclude_srcs: [
                 "upstream-openbsd/lib/libc/string/memchr.c",
+                "upstream-openbsd/lib/libc/string/memrchr.c",
                 "upstream-openbsd/lib/libc/string/stpcpy.c",
                 "upstream-openbsd/lib/libc/string/strcpy.c",
                 "upstream-openbsd/lib/libc/string/strncmp.c",
@@ -717,6 +719,14 @@ cc_library_static {
             srcs: [
                 "arch-arm64/generic/bionic/__memcpy_chk.S",
             ],
+            kryo: {
+                srcs: [
+                    "arch-arm64/kryo/bionic/__memcpy_chk.S",
+                ],
+                exclude_srcs: [
+                    "arch-arm64/generic/bionic/__memcpy_chk.S",
+                ],
+            },
         },
     },
 }
@@ -751,6 +761,7 @@ cc_library_static {
     arch: {
         arm: {
             srcs: [
+                "arch-arm/generic/bionic/memchr.S",
                 "arch-arm/generic/bionic/memcmp.S",
                 "arch-arm/generic/bionic/memmove.S",
                 "arch-arm/generic/bionic/memset.S",
@@ -788,13 +799,11 @@ cc_library_static {
                 "arch-arm/cortex-a9/bionic/memset.S",
                 "arch-arm/cortex-a9/bionic/stpcpy.S",
                 "arch-arm/cortex-a9/bionic/strcat.S",
-                "arch-arm/cortex-a9/bionic/strcmp.S",
                 "arch-arm/cortex-a9/bionic/strcpy.S",
                 "arch-arm/cortex-a9/bionic/strlen.S",
 
                 "arch-arm/krait/bionic/memcpy.S",
                 "arch-arm/krait/bionic/memset.S",
-                "arch-arm/krait/bionic/strcmp.S",
 
                 "arch-arm/cortex-a53/bionic/memcpy.S",
 
@@ -809,9 +818,11 @@ cc_library_static {
                 "arch-arm64/generic/bionic/memcmp.S",
                 "arch-arm64/generic/bionic/memcpy.S",
                 "arch-arm64/generic/bionic/memmove.S",
+                "arch-arm64/generic/bionic/memrchr.S",
                 "arch-arm64/generic/bionic/memset.S",
                 "arch-arm64/generic/bionic/stpcpy.S",
                 "arch-arm64/generic/bionic/strchr.S",
+                "arch-arm64/generic/bionic/strrchr.S",
                 "arch-arm64/generic/bionic/strcmp.S",
                 "arch-arm64/generic/bionic/strcpy.S",
                 "arch-arm64/generic/bionic/strlen.S",
@@ -829,7 +840,21 @@ cc_library_static {
                 "bionic/__memcpy_chk.cpp",
                 "bionic/strchr.cpp",
                 "bionic/strnlen.c",
+                "bionic/strrchr.cpp",
             ],
+            kryo: {
+                srcs: [
+                    "arch-arm64/kryo/bionic/__memcpy.S",
+                    "arch-arm64/kryo/bionic/memcpy.S",
+                    "arch-arm64/kryo/bionic/memmove.S",
+                    "arch-arm64/kryo/bionic/wmemmove.S",
+                ],
+                exclude_srcs: [
+                    "arch-arm64/generic/bionic/memcpy.S",
+                    "arch-arm64/generic/bionic/memmove.S",
+                    "arch-arm64/generic/bionic/wmemmove.S",
+                ],
+            },
         },
 
         mips: {
@@ -1791,6 +1816,7 @@ genrule {
 
 cc_defaults {
     name: "crt_defaults",
+    sdclang: true,
     defaults: ["linux_bionic_supported"],
     vendor_available: true,
     recovery_available: true,
@@ -2194,8 +2220,7 @@ cc_object {
     ],
 }
 
-// Generate the C++ policy sources for app, system, and global seccomp-bpf
-// filters.
+// Generate the C++ policy sources for app and system seccomp-bpf filters.
 python_binary_host {
     name: "genseccomp",
     main: "tools/genseccomp.py",
@@ -2285,6 +2310,7 @@ cc_genrule {
         "SECCOMP_WHITELIST_COMMON.TXT",
         "SECCOMP_WHITELIST_APP.TXT",
         "SECCOMP_BLACKLIST_COMMON.TXT",
+        "SECCOMP_PRIORITY.TXT",
         ":generate_app_zygote_blacklist",
         ":libseccomp_gen_syscall_nrs_arm",
         ":libseccomp_gen_syscall_nrs_arm64",
@@ -2317,6 +2343,7 @@ cc_genrule {
         "SECCOMP_WHITELIST_APP.TXT",
         "SECCOMP_BLACKLIST_COMMON.TXT",
         "SECCOMP_BLACKLIST_APP.TXT",
+        "SECCOMP_PRIORITY.TXT",
         ":libseccomp_gen_syscall_nrs_arm",
         ":libseccomp_gen_syscall_nrs_arm64",
         ":libseccomp_gen_syscall_nrs_mips",
@@ -2347,6 +2374,7 @@ cc_genrule {
         "SECCOMP_WHITELIST_COMMON.TXT",
         "SECCOMP_WHITELIST_SYSTEM.TXT",
         "SECCOMP_BLACKLIST_COMMON.TXT",
+        "SECCOMP_PRIORITY.TXT",
         ":libseccomp_gen_syscall_nrs_arm",
         ":libseccomp_gen_syscall_nrs_arm64",
         ":libseccomp_gen_syscall_nrs_mips",
@@ -2365,38 +2393,6 @@ cc_genrule {
     ],
 }
 
-cc_genrule {
-    name: "libseccomp_policy_global_sources",
-    recovery_available: true,
-    cmd: "$(location genseccomp) --out-dir=$(genDir) --name-modifier=global $(in)",
-
-    tools: [ "genseccomp" ],
-
-    srcs: [
-        "SYSCALLS.TXT",
-        "SECCOMP_WHITELIST_COMMON.TXT",
-        "SECCOMP_WHITELIST_SYSTEM.TXT",
-        "SECCOMP_WHITELIST_APP.TXT",
-        "SECCOMP_WHITELIST_GLOBAL.TXT",
-        "SECCOMP_BLACKLIST_COMMON.TXT",
-        ":libseccomp_gen_syscall_nrs_arm",
-        ":libseccomp_gen_syscall_nrs_arm64",
-        ":libseccomp_gen_syscall_nrs_mips",
-        ":libseccomp_gen_syscall_nrs_mips64",
-        ":libseccomp_gen_syscall_nrs_x86",
-        ":libseccomp_gen_syscall_nrs_x86_64",
-    ],
-
-    out: [
-        "arm64_global_policy.cpp",
-        "arm_global_policy.cpp",
-        "mips64_global_policy.cpp",
-        "mips_global_policy.cpp",
-        "x86_64_global_policy.cpp",
-        "x86_global_policy.cpp",
-    ],
-}
-
 cc_library {
     name: "libseccomp_policy",
     recovery_available: true,
@@ -2404,7 +2400,6 @@ cc_library {
     generated_sources: [
         "libseccomp_policy_app_sources",
         "libseccomp_policy_app_zygote_sources",
-        "libseccomp_policy_global_sources",
         "libseccomp_policy_system_sources",
     ],
 
