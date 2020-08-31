@@ -1,7 +1,7 @@
-/*	$OpenBSD: strstr.c,v 1.9 2020/04/16 12:37:52 claudio Exp $ */
+/*	$OpenBSD: memmem.c,v 1.5 2020/04/16 12:39:28 claudio Exp $ */
 
 /*
- * Copyright (c) 2005-2018 Rich Felker
+ * Copyright (c) 2005-2020 Rich Felker, et al.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -27,29 +27,32 @@
 #include <stdint.h>
 
 static char *
-twobyte_strstr(const unsigned char *h, const unsigned char *n)
+twobyte_memmem(const unsigned char *h, size_t k, const unsigned char *n)
 {
 	uint16_t nw = n[0]<<8 | n[1], hw = h[0]<<8 | h[1];
-	for (h++; *h && hw != nw; hw = hw<<8 | *++h);
-	return *h ? (char *)h-1 : 0;
+	for (h+=2, k-=2; k; k--, hw = hw<<8 | *h++)
+		if (hw == nw) return (char *)h-2;
+	return hw == nw ? (char *)h-2 : 0;
 }
 
 static char *
-threebyte_strstr(const unsigned char *h, const unsigned char *n)
+threebyte_memmem(const unsigned char *h, size_t k, const unsigned char *n)
 {
 	uint32_t nw = n[0]<<24 | n[1]<<16 | n[2]<<8;
 	uint32_t hw = h[0]<<24 | h[1]<<16 | h[2]<<8;
-	for (h+=2; *h && hw != nw; hw = (hw|*++h)<<8);
-	return *h ? (char *)h-2 : 0;
+	for (h+=3, k-=3; k; k--, hw = (hw|*h++)<<8)
+		if (hw == nw) return (char *)h-3;
+	return hw == nw ? (char *)h-3 : 0;
 }
 
 static char *
-fourbyte_strstr(const unsigned char *h, const unsigned char *n)
+fourbyte_memmem(const unsigned char *h, size_t k, const unsigned char *n)
 {
 	uint32_t nw = n[0]<<24 | n[1]<<16 | n[2]<<8 | n[3];
 	uint32_t hw = h[0]<<24 | h[1]<<16 | h[2]<<8 | h[3];
-	for (h+=3; *h && hw != nw; hw = hw<<8 | *++h);
-	return *h ? (char *)h-3 : 0;
+	for (h+=4, k-=4; k; k--, hw = hw<<8 | *h++)
+		if (hw == nw) return (char *)h-4;
+	return hw == nw ? (char *)h-4 : 0;
 }
 
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -63,17 +66,16 @@ fourbyte_strstr(const unsigned char *h, const unsigned char *n)
  * Journal of the ACM, 38(3):651-675, July 1991.
  */
 static char *
-twoway_strstr(const unsigned char *h, const unsigned char *n)
+twoway_memmem(const unsigned char *h, const unsigned char *z,
+    const unsigned char *n, size_t l)
 {
-	const unsigned char *z;
-	size_t l, ip, jp, k, p, ms, p0, mem, mem0;
+	size_t i, ip, jp, k, p, ms, p0, mem, mem0;
 	size_t byteset[32 / sizeof(size_t)] = { 0 };
 	size_t shift[256];
 
 	/* Computing length of needle and fill shift table */
-	for (l=0; n[l] && h[l]; l++)
-		BITOP(byteset, n[l], |=), shift[n[l]] = l+1;
-	if (n[l]) return 0; /* hit the end of h */
+	for (i=0; i<l; i++)
+		BITOP(byteset, n[i], |=), shift[n[i]] = i+1;
 
 	/* Compute maximal suffix */
 	ip = -1; jp = 0; k = p = 1;
@@ -122,21 +124,10 @@ twoway_strstr(const unsigned char *h, const unsigned char *n)
 	} else mem0 = l-p;
 	mem = 0;
 
-	/* Initialize incremental end-of-haystack pointer */
-	z = h;
-
 	/* Search loop */
 	for (;;) {
-		/* Update incremental end-of-haystack pointer */
-		if (z-h < l) {
-			/* Fast estimate for MIN(l,63) */
-			size_t grow = l | 63;
-			const unsigned char *z2 = memchr(z, 0, grow);
-			if (z2) {
-				z = z2;
-				if (z-h < l) return 0;
-			} else z += grow;
-		}
+		/* If remainder of haystack is shorter than needle, done */
+		if (z-h < l) return 0;
 
 		/* Check last byte first; advance by shift on mismatch */
 		if (BITOP(byteset, h[l-1], &)) {
@@ -154,8 +145,8 @@ twoway_strstr(const unsigned char *h, const unsigned char *n)
 		}
 
 		/* Compare right half */
-		for (k=MAX(ms+1,mem); n[k] && n[k] == h[k]; k++);
-		if (n[k]) {
+		for (k=MAX(ms+1,mem); k<l && n[k] == h[k]; k++);
+		if (k < l) {
 			h += k-ms;
 			mem = 0;
 			continue;
@@ -168,22 +159,26 @@ twoway_strstr(const unsigned char *h, const unsigned char *n)
 	}
 }
 
-char *
-strstr(const char *h, const char *n)
+void *
+memmem(const void *h0, size_t k, const void *n0, size_t l)
 {
+	const unsigned char *h = h0, *n = n0;
+
 	/* Return immediately on empty needle */
-	if (!n[0]) return (char *)h;
+	if (!l) return (void *)h;
+
+	/* Return immediately when needle is longer than haystack */
+	if (k<l) return 0;
 
 	/* Use faster algorithms for short needles */
-	h = strchr(h, *n);
-	if (!h || !n[1]) return (char *)h;
-	if (!h[1]) return 0;
-	if (!n[2]) return twobyte_strstr((void *)h, (void *)n);
-	if (!h[2]) return 0;
-	if (!n[3]) return threebyte_strstr((void *)h, (void *)n);
-	if (!h[3]) return 0;
-	if (!n[4]) return fourbyte_strstr((void *)h, (void *)n);
+	h = memchr(h0, *n, k);
+	if (!h || l==1) return (void *)h;
+	k -= h - (const unsigned char *)h0;
+	if (k<l) return 0;
+	if (l==2) return twobyte_memmem(h, k, n);
+	if (l==3) return threebyte_memmem(h, k, n);
+	if (l==4) return fourbyte_memmem(h, k, n);
 
-	return twoway_strstr((void *)h, (void *)n);
+	return twoway_memmem(h, h+k, n, l);
 }
-DEF_STRONG(strstr);
+DEF_WEAK(memmem);
